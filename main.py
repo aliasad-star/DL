@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from scipy.stats import skew, kurtosis
+from scipy.fftpack import fft
 from sklearn.model_selection import train_test_split  # For splitting dataset
 
 # Constants
@@ -19,7 +21,67 @@ all_signals = []  # To store defected signals
 all_defect_free_signals = []  # To store defect-free signals
 all_coord_matrices = []  # To store Tx-Rx coordinates
 all_defect_bboxes = []  # To store bounding box labels
+all_signal_features = []  # To store extracted features for defected signals
+all_defect_free_signal_features = []  # To store extracted features for defect-free signals
 signal_groups = []  # To store signals in grouped form (30 groups)
+
+
+# Feature extraction functions
+def extract_statistical_features(signal):
+    """Extract key statistical features from a signal."""
+    mean_val = np.mean(signal)
+    std_val = np.std(signal)
+    max_val = np.max(signal)
+    min_val = np.min(signal)
+    variance_val = np.var(signal)
+    skewness_val = skew(signal)
+    kurtosis_val = kurtosis(signal)
+    energy_val = np.sum(signal ** 2)
+    rms_val = np.sqrt(np.mean(signal ** 2))
+
+    return {
+        "mean": mean_val,
+        "std": std_val,
+        "max": max_val,
+        "min": min_val,
+        "variance": variance_val,
+        "skewness": skewness_val,
+        "kurtosis": kurtosis_val,
+        "energy": energy_val,
+        "rms": rms_val
+    }
+
+
+def extract_spectral_features(signal, sampling_rate=1):
+    """Extract frequency-domain features from a signal using FFT."""
+    N = len(signal)
+    fft_vals = np.abs(fft(signal))  # Magnitude of FFT
+    fft_freqs = np.fft.fftfreq(N, d=1 / sampling_rate)  # FFT frequencies
+
+    # Retain only the positive half of frequencies
+    fft_vals = fft_vals[:N // 2]
+    fft_freqs = fft_freqs[:N // 2]
+
+    # Compute spectral features
+    total_energy = np.sum(fft_vals ** 2)
+    spectral_centroid = np.sum(fft_freqs * fft_vals) / np.sum(fft_vals)
+    spectral_bandwidth = np.sqrt(np.sum(((fft_freqs - spectral_centroid) ** 2) * fft_vals) / np.sum(fft_vals))
+    dominant_frequency = fft_freqs[np.argmax(fft_vals)]
+
+    return {
+        "spectral_energy": total_energy,
+        "spectral_centroid": spectral_centroid,
+        "spectral_bandwidth": spectral_bandwidth,
+        "dominant_frequency": dominant_frequency
+    }
+
+
+def extract_features(signal, sampling_rate=1):
+    """Combine statistical and spectral features into a single feature dictionary."""
+    features = {}
+    features.update(extract_statistical_features(signal))
+    features.update(extract_spectral_features(signal, sampling_rate))
+    return features
 
 
 def normalize_coord(x, y):
@@ -79,8 +141,9 @@ for idx, row in master_df.iterrows():
     _, col_idx = indices
     defected_signal_vector = signal_df.iloc[:, col_idx].values
 
-    # Append the defected signal to the list
+    # Append the defected signal and extract features
     all_signals.append(defected_signal_vector)
+    all_signal_features.append(extract_features(defected_signal_vector))
 
     # Read defect-free signal file
     defect_free_path = os.path.join(SIGNAL_FOLDER, f"{defect_free_file}.xlsx")
@@ -89,21 +152,22 @@ for idx, row in master_df.iterrows():
     # Extract the corresponding defect-free signal
     defect_free_signal_vector = defect_free_df.iloc[:, col_idx].values
 
-    # Append the defect-free signal to the list
+    # Append the defect-free signal and extract features
     all_defect_free_signals.append(defect_free_signal_vector)
-
-# === NEW CODE BLOCK STARTS HERE === #
+    all_defect_free_signal_features.append(extract_features(defect_free_signal_vector))
 
 # Step 1: Group the signals
-# Assume there are exactly 30 groups, each with 12 signals
 for i in range(0, len(all_signals), GROUP_SIZE):
     group = {
-        "signals": all_signals[i:i + GROUP_SIZE],  # Select 12 signals
-        "defect_free_signals": all_defect_free_signals[i:i + GROUP_SIZE],  # Select 12 defect-free signals
-        "coordinates": all_coord_matrices[i:i + GROUP_SIZE],  # Select corresponding coordinate matrices
-        "bounding_boxes": all_defect_bboxes[i:i + GROUP_SIZE]  # Select corresponding bounding boxes
+        "signals": all_signals[i:i + GROUP_SIZE],
+        "defect_free_signals": all_defect_free_signals[i:i + GROUP_SIZE],
+        "coordinates": all_coord_matrices[i:i + GROUP_SIZE],
+        "bounding_boxes": all_defect_bboxes[i:i + GROUP_SIZE],
+        "features": all_signal_features[i:i + GROUP_SIZE],  # Include features in the group
+        "defect_free_features": all_defect_free_signal_features[i:i + GROUP_SIZE]  # Include defect-free features
     }
-    signal_groups.append(group)  # Append each group to the signal_groups list
+    signal_groups.append(group)
+
 
 print(f"Total groups formed: {len(signal_groups)} (Each group has {GROUP_SIZE} signals)")
 
