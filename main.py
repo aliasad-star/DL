@@ -1,21 +1,25 @@
 import os
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from sklearn.model_selection import train_test_split  # For splitting dataset
 
 # Constants
 PLATE_WIDTH = 400
 PLATE_HEIGHT = 400
 SIGNAL_FOLDER = "signals_data"  # Folder name where all signal files are stored
+GROUP_SIZE = 12  # Each group contains 12 signals
 
 # Load updated master data with new columns
 master_df = pd.read_excel("coords.xlsx")
 
 # Prepare data containers
-all_signals = []
+all_signals = []  # To store defected signals
 all_defect_free_signals = []  # To store defect-free signals
-all_coord_matrices = []
-all_defect_bboxes = []
+all_coord_matrices = []  # To store Tx-Rx coordinates
+all_defect_bboxes = []  # To store bounding box labels
+signal_groups = []  # To store signals in grouped form (30 groups)
 
 
 def normalize_coord(x, y):
@@ -67,9 +71,6 @@ for idx, row in master_df.iterrows():
     signal_path = os.path.join(SIGNAL_FOLDER, f"{file_name}.xlsx")
     signal_df = pd.read_excel(signal_path, header=0)
 
-    # Debug info: which file, Tx-Rx pair
-    # print(f"Reading defected signal from file: {file_name}, Tx: {tx_id}, Rx: {rx_id}")
-
     # Extract the defected signal using Tx-Rx pairing
     indices = get_signal_index(tx_id, rx_id)
     if indices is None:
@@ -91,42 +92,50 @@ for idx, row in master_df.iterrows():
     # Append the defect-free signal to the list
     all_defect_free_signals.append(defect_free_signal_vector)
 
-    # (Optional) Read and process time file if needed for additional steps
-    # This assumes the time data may influence specific computations.
-    # Uncomment the following code if you need to read and validate the shared time file.
-    # time_df = pd.read_excel(time_file)
-    # print(time_df.head())  # Just for debugging
+# === NEW CODE BLOCK STARTS HERE === #
 
-# Final lists:
-# - all_signals: [defected_signal_1, defected_signal_2, ...]
-# - all_defect_free_signals: [defect_free_signal_1, defect_free_signal_2, ...]
-# - all_coord_matrices: [[[tx_x, tx_y], [rx_x, rx_y]], ...]
-# - all_defect_bboxes: [[x_c, y_c, w, h], ...]
+# Step 1: Group the signals
+# Assume there are exactly 30 groups, each with 12 signals
+for i in range(0, len(all_signals), GROUP_SIZE):
+    group = {
+        "signals": all_signals[i:i + GROUP_SIZE],  # Select 12 signals
+        "defect_free_signals": all_defect_free_signals[i:i + GROUP_SIZE],  # Select 12 defect-free signals
+        "coordinates": all_coord_matrices[i:i + GROUP_SIZE],  # Select corresponding coordinate matrices
+        "bounding_boxes": all_defect_bboxes[i:i + GROUP_SIZE]  # Select corresponding bounding boxes
+    }
+    signal_groups.append(group)  # Append each group to the signal_groups list
 
-print(f"Loaded {len(all_signals)} defected signals.")
-print(f"Loaded {len(all_defect_free_signals)} defect-free signals.")
+print(f"Total groups formed: {len(signal_groups)} (Each group has {GROUP_SIZE} signals)")
 
-for i in range(3):  # First 3 signals
-    file_name = master_df.iloc[i]['File_Name']
-    tx_id = master_df.iloc[i]['Transmitter_ID']
-    rx_id = master_df.iloc[i]['Receiver_ID']
-    defect_free_file = master_df.iloc[i]['Defect_Free_File']
-    header_label = f"{tx_id}-{rx_id}"
+# Step 2: Split the data into train, validation, and test sets
+# For the splitting, we focus on maintaining the grouping
+train_groups, temp_groups = train_test_split(signal_groups, test_size=0.4, random_state=42)  # 60% Train
+val_groups, test_groups = train_test_split(temp_groups, test_size=0.5, random_state=42)  # 20% Validation, 20% Test
 
-    print(f"Defected Signal: {file_name}, Defect-Free Signal: {defect_free_file}")
-    print(f"Signal Header: {header_label}")
-    print(f"Defected Signal Samples (first 20): {all_signals[i][:20]}")
-    print(f"Defect-Free Signal Samples (first 20): {all_defect_free_signals[i][:20]}")
-    print("=" * 50)
+print(f"Training Groups: {len(train_groups)}")
+print(f"Validation Groups: {len(val_groups)}")
+print(f"Testing Groups: {len(test_groups)}")
 
-print(f"Total coordinate pairs: {len(all_coord_matrices)}")
-print(f"Total defect bounding boxes: {len(all_defect_bboxes)}")
 
-# Sample preview for debugging
-print("\nSample coordinate matrices:")
-for coords in all_coord_matrices[:3]:
-    print(coords)
+# Step 3: Prepare the flattened datasets for training
+# Flatten grouped data into lists for easier processing by the model
+def flatten_groups(groups):
+    signals = []
+    defect_free_signals = []
+    bboxes = []
+    for group in groups:
+        signals.extend(group["signals"])
+        defect_free_signals.extend(group["defect_free_signals"])
+        bboxes.extend(group["bounding_boxes"])
+    return np.array(signals), np.array(defect_free_signals), np.array(bboxes)
 
-print("\nSample defect bounding boxes:")
-for bbox in all_defect_bboxes[:3]:
-    print(bbox)
+
+# Flatten training, validation, and testing groups
+X_train, X_train_def_free, y_train = flatten_groups(train_groups)
+X_val, X_val_def_free, y_val = flatten_groups(val_groups)
+X_test, X_test_def_free, y_test = flatten_groups(test_groups)
+
+print(f"Training Data: Signals - {X_train.shape}, Bounding Boxes - {y_train.shape}")
+print(f"Validation Data: Signals - {X_val.shape}, Bounding Boxes - {y_val.shape}")
+print(f"Testing Data: Signals - {X_test.shape}, Bounding Boxes - {y_test.shape}")
+
