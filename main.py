@@ -138,4 +138,3 @@ X_test, X_test_def_free, y_test = flatten_groups(test_groups)
 print(f"Training Data: Signals - {X_train.shape}, Bounding Boxes - {y_train.shape}")
 print(f"Validation Data: Signals - {X_val.shape}, Bounding Boxes - {y_val.shape}")
 print(f"Testing Data: Signals - {X_test.shape}, Bounding Boxes - {y_test.shape}")
-
